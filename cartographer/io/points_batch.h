@@ -17,6 +17,7 @@
 #ifndef CARTOGRAPHER_IO_POINTS_BATCH_H_
 #define CARTOGRAPHER_IO_POINTS_BATCH_H_
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -34,7 +35,7 @@ using Color = std::array<uint8_t, 3>;
 struct PointsBatch {
   PointsBatch() {
     origin = Eigen::Vector3f::Zero();
-    trajectory_index = 0;
+    trajectory_id = 0;
   }
 
   // Time at which this batch has been acquired.
@@ -48,10 +49,20 @@ struct PointsBatch {
   // is unknown.
   string frame_id;
 
-  // Trajectory index that produced this point.
-  int trajectory_index;
+  // Trajectory ID that produced this point.
+  int trajectory_id;
 
+  // Geometry of the points in a metric frame.
   std::vector<Eigen::Vector3f> points;
+
+  // Intensities are optional and may be unspecified. The meaning of these
+  // intensity values varies by device. For example, the VLP16 provides values
+  // in the range [0, 100] for non-specular return values and values up to 255
+  // for specular returns. On the other hand, Hokuyo lasers provide a 16-bit
+  // value that rarely peaks above 4096.
+  std::vector<float> intensities;
+
+  // Colors are optional. If set, they are RGB values.
   std::vector<Color> colors;
 };
 

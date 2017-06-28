@@ -80,8 +80,8 @@ PoseTracker::State ComputeDelta(const PoseTracker::State& origin,
 }
 
 // Build a model matrix for the given time delta.
-PoseTracker::State ModelFunction3D(const PoseTracker::State& state,
-                                   const double delta_t) {
+PoseTracker::State ModelFunction(const PoseTracker::State& state,
+                                 const double delta_t) {
   CHECK_GT(delta_t, 0.);
 
   PoseTracker::State new_state;
@@ -109,30 +109,7 @@ PoseTracker::State ModelFunction3D(const PoseTracker::State& state,
   return new_state;
 }
 
-// A specialization of ModelFunction3D that limits the z-component of position
-// and velocity to 0.
-PoseTracker::State ModelFunction2D(const PoseTracker::State& state,
-                                   const double delta_t) {
-  auto new_state = ModelFunction3D(state, delta_t);
-  new_state[PoseTracker::kMapPositionZ] = 0.;
-  new_state[PoseTracker::kMapVelocityZ] = 0.;
-  new_state[PoseTracker::kMapOrientationX] = 0.;
-  new_state[PoseTracker::kMapOrientationY] = 0.;
-  return new_state;
-}
-
 }  // namespace
-
-PoseAndCovariance operator*(const transform::Rigid3d& transform,
-                            const PoseAndCovariance& pose_and_covariance) {
-  GaussianDistribution<double, 6> distribution(
-      Eigen::Matrix<double, 6, 1>::Zero(), pose_and_covariance.covariance);
-  Eigen::Matrix<double, 6, 6> linear_transform;
-  linear_transform << transform.rotation().matrix(), Eigen::Matrix3d::Zero(),
-      Eigen::Matrix3d::Zero(), transform.rotation().matrix();
-  return {transform * pose_and_covariance.pose,
-          (linear_transform * distribution).GetCovariance()};
-}
 
 proto::PoseTrackerOptions CreatePoseTrackerOptions(
     common::LuaParameterDictionary* const parameter_dictionary) {
@@ -145,8 +122,6 @@ proto::PoseTrackerOptions CreatePoseTrackerOptions(
       parameter_dictionary->GetDouble("velocity_model_variance"));
   options.set_imu_gravity_time_constant(
       parameter_dictionary->GetDouble("imu_gravity_time_constant"));
-  options.set_imu_gravity_variance(
-      parameter_dictionary->GetDouble("imu_gravity_variance"));
   options.set_num_odometry_states(
       parameter_dictionary->GetNonNegativeInt("num_odometry_states"));
   CHECK_GT(options.num_odometry_states(), 0);
@@ -163,10 +138,8 @@ PoseTracker::Distribution PoseTracker::KalmanFilterInit() {
 }
 
 PoseTracker::PoseTracker(const proto::PoseTrackerOptions& options,
-                         const ModelFunction& model_function,
                          const common::Time time)
     : options_(options),
-      model_function_(model_function),
       time_(time),
       kalman_filter_(KalmanFilterInit(), AddDelta, ComputeDelta),
       imu_tracker_(options.imu_gravity_time_constant(), time),
@@ -179,20 +152,8 @@ PoseTracker::Distribution PoseTracker::GetBelief(const common::Time time) {
   return kalman_filter_.GetBelief();
 }
 
-void PoseTracker::GetPoseEstimateMeanAndCovariance(const common::Time time,
-                                                   transform::Rigid3d* pose,
-                                                   PoseCovariance* covariance) {
-  const Distribution belief = GetBelief(time);
-  *pose = RigidFromState(belief.GetMean());
-  static_assert(kMapPositionX == 0, "Cannot extract PoseCovariance.");
-  static_assert(kMapPositionY == 1, "Cannot extract PoseCovariance.");
-  static_assert(kMapPositionZ == 2, "Cannot extract PoseCovariance.");
-  static_assert(kMapOrientationX == 3, "Cannot extract PoseCovariance.");
-  static_assert(kMapOrientationY == 4, "Cannot extract PoseCovariance.");
-  static_assert(kMapOrientationZ == 5, "Cannot extract PoseCovariance.");
-  *covariance = belief.GetCovariance().block<6, 6>(0, 0);
-  covariance->block<2, 2>(3, 3) +=
-      options_.imu_gravity_variance() * Eigen::Matrix2d::Identity();
+transform::Rigid3d PoseTracker::GetPoseEstimateMean(const common::Time time) {
+  return RigidFromState(GetBelief(time).GetMean());
 }
 
 const PoseTracker::Distribution PoseTracker::BuildModelNoise(
@@ -228,14 +189,7 @@ void PoseTracker::Predict(const common::Time time) {
   }
   kalman_filter_.Predict(
       [this, delta_t](const State& state) -> State {
-        switch (model_function_) {
-          case ModelFunction::k2D:
-            return ModelFunction2D(state, delta_t);
-          case ModelFunction::k3D:
-            return ModelFunction3D(state, delta_t);
-          default:
-            LOG(FATAL);
-        }
+        return ModelFunction(state, delta_t);
       },
       BuildModelNoise(delta_t));
   time_ = time;
@@ -316,44 +270,6 @@ transform::Rigid3d PoseTracker::RigidFromState(
                           state[PoseTracker::kMapOrientationY],
                           state[PoseTracker::kMapOrientationZ])) *
           imu_tracker_.orientation());
-}
-
-Pose2DCovariance Project2D(const PoseCovariance& covariance) {
-  Pose2DCovariance projected_covariance;
-  projected_covariance.block<2, 2>(0, 0) = covariance.block<2, 2>(0, 0);
-  projected_covariance.block<2, 1>(0, 2) = covariance.block<2, 1>(0, 5);
-  projected_covariance.block<1, 2>(2, 0) = covariance.block<1, 2>(5, 0);
-  projected_covariance(2, 2) = covariance(5, 5);
-  return projected_covariance;
-}
-
-PoseCovariance Embed3D(const Pose2DCovariance& embedded_covariance,
-                       const double position_variance,
-                       const double orientation_variance) {
-  PoseCovariance covariance;
-  covariance.setZero();
-  covariance.block<2, 2>(0, 0) = embedded_covariance.block<2, 2>(0, 0);
-  covariance.block<2, 1>(0, 5) = embedded_covariance.block<2, 1>(0, 2);
-  covariance.block<1, 2>(5, 0) = embedded_covariance.block<1, 2>(2, 0);
-  covariance(5, 5) = embedded_covariance(2, 2);
-
-  covariance(2, 2) = position_variance;
-  covariance(3, 3) = orientation_variance;
-  covariance(4, 4) = orientation_variance;
-  return covariance;
-}
-
-PoseCovariance PoseCovarianceFromProtoMatrix(
-    const sensor::proto::Matrix& proto_matrix) {
-  PoseCovariance covariance;
-  CHECK_EQ(proto_matrix.rows(), 6);
-  CHECK_EQ(proto_matrix.cols(), 6);
-  for (int i = 0; i < 6; ++i) {
-    for (int j = 0; j < 6; ++j) {
-      covariance(i, j) = proto_matrix.data(i * 6 + j);
-    }
-  }
-  return covariance;
 }
 
 PoseCovariance BuildPoseCovariance(const double translational_variance,

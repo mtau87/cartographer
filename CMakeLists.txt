@@ -22,12 +22,12 @@ set(CARTOGRAPHER_PATCH_VERSION 0)
 set(CARTOGRAPHER_VERSION ${CARTOGRAPHER_MAJOR_VERSION}.${CARTOGRAPHER_MINOR_VERSION}.${CARTOGRAPHER_PATCH_VERSION})
 set(CARTOGRAPHER_SOVERSION ${CARTOGRAPHER_MAJOR_VERSION}.${CARTOGRAPHER_MINOR_VERSION})
 
-include("${CMAKE_SOURCE_DIR}/cmake/functions.cmake")
+include("${PROJECT_SOURCE_DIR}/cmake/functions.cmake")
 google_initialize_cartographer_project()
 google_enable_testing()
 
 find_package(Boost REQUIRED COMPONENTS iostreams)
-find_package(Ceres REQUIRED)
+find_package(Ceres REQUIRED COMPONENTS SparseLinearAlgebraLibrary)
 find_package(Eigen3 REQUIRED)
 find_package(LuaGoogle REQUIRED)
 find_package(Protobuf REQUIRED)
@@ -44,7 +44,9 @@ endif()
 # Install catkin package.xml
 install(FILES package.xml DESTINATION share/cartographer)
 
-set(CARTOGRAPHER_CONFIGURATION_FILES_DIRECTORY ${CMAKE_INSTALL_PREFIX}/share/cartographer/configuration_files)
+set(CARTOGRAPHER_CONFIGURATION_FILES_DIRECTORY ${CMAKE_INSTALL_PREFIX}/share/cartographer/configuration_files
+  CACHE PATH ".lua configuration files directory")
+
 install(DIRECTORY configuration_files DESTINATION share/cartographer/)
 
 install(DIRECTORY cmake DESTINATION share/cartographer/)
@@ -59,19 +61,19 @@ file(GLOB_RECURSE ALL_PROTOS "*.proto")
 set(ALL_PROTO_SRCS)
 set(ALL_PROTO_HDRS)
 foreach(ABS_FIL ${ALL_PROTOS})
-  file(RELATIVE_PATH REL_FIL ${CMAKE_SOURCE_DIR} ${ABS_FIL})
+  file(RELATIVE_PATH REL_FIL ${PROJECT_SOURCE_DIR} ${ABS_FIL})
   get_filename_component(DIR ${REL_FIL} DIRECTORY)
   get_filename_component(FIL_WE ${REL_FIL} NAME_WE)
 
-  list(APPEND ALL_PROTO_SRCS "${CMAKE_BINARY_DIR}/${DIR}/${FIL_WE}.pb.cc")
-  list(APPEND ALL_PROTO_HDRS "${CMAKE_BINARY_DIR}/${DIR}/${FIL_WE}.pb.h")
+  list(APPEND ALL_PROTO_SRCS "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.cc")
+  list(APPEND ALL_PROTO_HDRS "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.h")
 
   add_custom_command(
-    OUTPUT "${CMAKE_BINARY_DIR}/${DIR}/${FIL_WE}.pb.cc"
-           "${CMAKE_BINARY_DIR}/${DIR}/${FIL_WE}.pb.h"
+    OUTPUT "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.cc"
+           "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.h"
     COMMAND  ${PROTOBUF_PROTOC_EXECUTABLE}
-    ARGS --cpp_out  ${CMAKE_BINARY_DIR} -I
-      ${CMAKE_SOURCE_DIR} ${ABS_FIL}
+    ARGS --cpp_out  ${PROJECT_BINARY_DIR} -I
+      ${PROJECT_SOURCE_DIR} ${ABS_FIL}
     DEPENDS ${ABS_FIL}
     COMMENT "Running C++ protocol buffer compiler on ${ABS_FIL}"
     VERBATIM
@@ -82,7 +84,29 @@ set_source_files_properties(${ALL_PROTO_SRCS} ${ALL_PROTO_HDRS} PROPERTIES GENER
 list(APPEND ALL_SRCS ${ALL_PROTO_SRCS} ${ALL_PROTO_HDRS})
 
 add_library(${PROJECT_NAME} ${ALL_SRCS})
-add_subdirectory("cartographer")
+
+configure_file(
+  ${PROJECT_SOURCE_DIR}/cartographer/common/config.h.cmake
+  ${PROJECT_BINARY_DIR}/cartographer/common/config.h)
+
+google_binary(cartographer_autogenerate_ground_truth
+  SRCS
+    cartographer/ground_truth/autogenerate_ground_truth_main.cc
+)
+
+google_binary(cartographer_compute_relations_metrics
+  SRCS
+    cartographer/ground_truth/compute_relations_metrics_main.cc
+)
+
+foreach(ABS_FIL ${ALL_TESTS})
+  file(RELATIVE_PATH REL_FIL ${PROJECT_SOURCE_DIR} ${ABS_FIL})
+  get_filename_component(DIR ${REL_FIL} DIRECTORY)
+  get_filename_component(FIL_WE ${REL_FIL} NAME_WE)
+  # Replace slashes as required for CMP0037.
+  string(REPLACE "/" "." TEST_TARGET_NAME "${DIR}/${FIL_WE}")
+  google_test("${TEST_TARGET_NAME}" ${ABS_FIL})
+endforeach()
 
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
   "${EIGEN3_INCLUDE_DIR}")
@@ -99,8 +123,6 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${LUA_LIBRARIES})
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
   "${Boost_INCLUDE_DIRS}")
 target_link_libraries(${PROJECT_NAME} PUBLIC ${Boost_LIBRARIES})
-
-target_link_libraries(${PROJECT_NAME} PUBLIC webp)
 
 # We expect find_package(Ceres) to have located these for us.
 target_link_libraries(${PROJECT_NAME} PUBLIC glog)
@@ -119,8 +141,8 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${PROTOBUF_LIBRARY} pthread)
 # Add the binary directory first, so that port.h is included after it has
 # been generated.
 target_include_directories(${PROJECT_NAME} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
 
@@ -144,7 +166,7 @@ install(
 # Install source headers.
 file(GLOB_RECURSE hdrs "*.h")
 foreach(HDR ${hdrs})
-  file(RELATIVE_PATH REL_FIL ${CMAKE_SOURCE_DIR} ${HDR})
+  file(RELATIVE_PATH REL_FIL ${PROJECT_SOURCE_DIR} ${HDR})
   get_filename_component(INSTALL_DIR ${REL_FIL} DIRECTORY)
   install(
     FILES
@@ -157,12 +179,12 @@ endforeach()
 # Install generated headers.
 file(GLOB_RECURSE hdrs "*.h.in")
 foreach(HDR ${hdrs})
-  file(RELATIVE_PATH REL_FIL ${CMAKE_SOURCE_DIR} ${HDR})
+  file(RELATIVE_PATH REL_FIL ${PROJECT_SOURCE_DIR} ${HDR})
   get_filename_component(DIR ${REL_FIL} DIRECTORY)
   get_filename_component(FIL_WE ${REL_FIL} NAME_WE)
   install(
     FILES
-      ${CMAKE_BINARY_DIR}/${DIR}/${FILE_WE}
+      ${PROJECT_BINARY_DIR}/${DIR}/${FILE_WE}
     DESTINATION
       include/${DIR}
   )
@@ -170,7 +192,7 @@ endforeach()
 
 # Install proto headers.
 foreach(HDR ${ALL_PROTO_HDRS})
-  file(RELATIVE_PATH REL_FIL ${CMAKE_BINARY_DIR} ${HDR})
+  file(RELATIVE_PATH REL_FIL ${PROJECT_BINARY_DIR} ${HDR})
   get_filename_component(DIR ${REL_FIL} DIRECTORY)
   install(
     FILES
@@ -184,7 +206,7 @@ set(CARTOGRAPHER_CMAKE_DIR share/cartographer/cmake)
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
   cartographer-config.cmake.in
-  ${CMAKE_BINARY_DIR}/cmake/cartographer/cartographer-config.cmake
+  ${PROJECT_BINARY_DIR}/cmake/cartographer/cartographer-config.cmake
   PATH_VARS CARTOGRAPHER_CMAKE_DIR
   INSTALL_DESTINATION ${CMAKE_INSTALL_PREFIX}/share/cartographer
 )
@@ -196,6 +218,6 @@ install(
 )
 
 install(
-  FILES ${CMAKE_BINARY_DIR}/cmake/cartographer/cartographer-config.cmake
+  FILES ${PROJECT_BINARY_DIR}/cmake/cartographer/cartographer-config.cmake
   DESTINATION share/cartographer/
 )

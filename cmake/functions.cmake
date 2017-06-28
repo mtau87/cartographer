@@ -32,12 +32,8 @@ macro(_common_compile_stuff VISIBILITY)
   target_link_libraries(${NAME} PUBLIC ${PROJECT_NAME})
 endmacro(_common_compile_stuff)
 
-function(google_test NAME)
-  _parse_arguments("${ARGN}")
-
-  add_executable(${NAME}
-    ${ARG_SRCS} ${ARG_HDRS}
-  )
+function(google_test NAME ARG_SRC)
+  add_executable(${NAME} ${ARG_SRC})
   _common_compile_stuff("PRIVATE")
 
   # Make sure that gmock always includes the correct gtest/gtest.h.
@@ -51,9 +47,7 @@ endfunction()
 function(google_binary NAME)
   _parse_arguments("${ARGN}")
 
-  add_executable(${NAME}
-    ${ARG_SRCS} ${ARG_HDRS}
-  )
+  add_executable(${NAME} ${ARG_SRCS})
 
   _common_compile_stuff("PRIVATE")
 
@@ -88,6 +82,7 @@ macro(google_initialize_cartographer_project)
   google_add_flag(GOOG_CXX_FLAGS "-Werror=missing-braces")
   google_add_flag(GOOG_CXX_FLAGS "-Werror=reorder")
   google_add_flag(GOOG_CXX_FLAGS "-Werror=return-type")
+  google_add_flag(GOOG_CXX_FLAGS "-Werror=switch")
   google_add_flag(GOOG_CXX_FLAGS "-Werror=uninitialized")
 
   if(NOT CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
@@ -99,7 +94,16 @@ macro(google_initialize_cartographer_project)
   elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     google_add_flag(GOOG_CXX_FLAGS "-O3 -g -DNDEBUG")
   elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(FATAL_ERROR "Compiling in debug mode is not supported.")
+    if(FORCE_DEBUG_BUILD)
+      message(WARNING "Building in Debug mode, expect very slow performance.")
+      google_add_flag(GOOG_CXX_FLAGS "-g")
+    else()
+      message(FATAL_ERROR
+        "Compiling in Debug mode is not supported and can cause severely degraded performance. "
+        "You should change the build type to Release. If you want to build in Debug mode anyway, "
+        "call CMake with -DFORCE_DEBUG_BUILD=True"
+      )
+    endif()
   else()
     message(FATAL_ERROR "Unknown CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
   endif()
@@ -107,10 +111,10 @@ macro(google_initialize_cartographer_project)
   message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
   # Add a hook that reruns CMake when source files are added or removed.
-  set(LIST_FILES_CMD "find ${CMAKE_SOURCE_DIR}/ -not -iwholename '*.git*' | sort | sed 's/^/#/'")
-  set(FILES_LIST_PATH "${CMAKE_BINARY_DIR}/AllFiles.cmake")
+  set(LIST_FILES_CMD "find ${PROJECT_SOURCE_DIR}/ -not -iwholename '*.git*' | sort | sed 's/^/#/'")
+  set(FILES_LIST_PATH "${PROJECT_BINARY_DIR}/AllFiles.cmake")
   set(DETECT_CHANGES_CMD "bash" "-c" "${LIST_FILES_CMD} | diff -N -q ${FILES_LIST_PATH} - || ${LIST_FILES_CMD} > ${FILES_LIST_PATH}")
-  add_custom_target(cartographer_detect_changes ALL
+  add_custom_target(${PROJECT_NAME}_detect_changes ALL
     COMMAND ${DETECT_CHANGES_CMD}
     VERBATIM
   )

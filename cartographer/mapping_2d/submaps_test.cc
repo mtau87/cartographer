@@ -17,6 +17,8 @@
 #include "cartographer/mapping_2d/submaps.h"
 
 #include <map>
+#include <memory>
+#include <set>
 #include <string>
 
 #include "cartographer/common/lua_parameter_dictionary.h"
@@ -30,40 +32,40 @@ namespace mapping_2d {
 namespace {
 
 TEST(SubmapsTest, TheRightNumberOfScansAreInserted) {
-  constexpr int kNumLaserFans = 10;
+  constexpr int kNumRangeData = 10;
   auto parameter_dictionary = common::MakeDictionary(
       "return {"
       "resolution = 0.05, "
       "half_length = 10., "
-      "num_laser_fans = " +
-      std::to_string(kNumLaserFans) +
+      "num_range_data = " +
+      std::to_string(kNumRangeData) +
       ", "
-      "output_debug_images = false, "
-      "laser_fan_inserter = {"
+      "range_data_inserter = {"
       "insert_free_space = true, "
       "hit_probability = 0.53, "
       "miss_probability = 0.495, "
       "},"
       "}");
-  Submaps submaps{CreateSubmapsOptions(parameter_dictionary.get())};
-  auto num_inserted = [&submaps](const int i) {
-    return submaps.Get(i)->end_laser_fan_index -
-           submaps.Get(i)->begin_laser_fan_index;
-  };
+  ActiveSubmaps submaps{CreateSubmapsOptions(parameter_dictionary.get())};
+  std::set<std::shared_ptr<Submap>> all_submaps;
   for (int i = 0; i != 1000; ++i) {
-    submaps.InsertLaserFan({Eigen::Vector3f::Zero(), {}, {}});
-    const int matching = submaps.matching_index();
+    submaps.InsertRangeData({Eigen::Vector3f::Zero(), {}, {}});
     // Except for the first, maps should only be returned after enough scans.
-    if (matching != 0) {
-      EXPECT_LE(kNumLaserFans, num_inserted(matching));
+    for (auto submap : submaps.submaps()) {
+      all_submaps.insert(submap);
+    }
+    if (submaps.matching_index() != 0) {
+      EXPECT_LE(kNumRangeData, submaps.submaps().front()->num_range_data());
     }
   }
-  for (int i = 0; i != submaps.size() - 2; ++i) {
-    // Submaps should not be left without the right number of scans in them.
-    EXPECT_EQ(kNumLaserFans * 2, num_inserted(i));
-    EXPECT_EQ(i * kNumLaserFans, submaps.Get(i)->begin_laser_fan_index);
-    EXPECT_EQ((i + 2) * kNumLaserFans, submaps.Get(i)->end_laser_fan_index);
+  int correct_num_scans = 0;
+  for (const auto& submap : all_submaps) {
+    if (submap->num_range_data() == kNumRangeData * 2) {
+      ++correct_num_scans;
+    }
   }
+  // Submaps should not be left without the right number of scans in them.
+  EXPECT_EQ(correct_num_scans, all_submaps.size() - 2);
 }
 
 }  // namespace

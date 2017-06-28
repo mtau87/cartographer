@@ -25,11 +25,11 @@
 #include "cartographer/mapping/proto/submap_visualization.pb.h"
 #include "cartographer/mapping/submaps.h"
 #include "cartographer/mapping/trajectory_node.h"
-#include "cartographer/mapping_2d/laser_fan_inserter.h"
 #include "cartographer/mapping_2d/map_limits.h"
 #include "cartographer/mapping_2d/probability_grid.h"
 #include "cartographer/mapping_2d/proto/submaps_options.pb.h"
-#include "cartographer/sensor/laser.h"
+#include "cartographer/mapping_2d/range_data_inserter.h"
+#include "cartographer/sensor/range_data.h"
 #include "cartographer/transform/rigid_transform.h"
 
 namespace cartographer {
@@ -41,45 +41,61 @@ ProbabilityGrid ComputeCroppedProbabilityGrid(
 proto::SubmapsOptions CreateSubmapsOptions(
     common::LuaParameterDictionary* parameter_dictionary);
 
-struct Submap : public mapping::Submap {
-  Submap(const MapLimits& limits, const Eigen::Vector2f& origin,
-         int begin_laser_fan_index);
-
-  ProbabilityGrid probability_grid;
-};
-
-// A container of Submaps.
-class Submaps : public mapping::Submaps {
+class Submap : public mapping::Submap {
  public:
-  explicit Submaps(const proto::SubmapsOptions& options);
+  Submap(const MapLimits& limits, const Eigen::Vector2f& origin);
 
-  Submaps(const Submaps&) = delete;
-  Submaps& operator=(const Submaps&) = delete;
+  const ProbabilityGrid& probability_grid() const { return probability_grid_; }
+  const bool finished() const { return finished_; }
 
-  const Submap* Get(int index) const override;
-  int size() const override;
-  void SubmapToProto(
-      int index, const std::vector<mapping::TrajectoryNode>& trajectory_nodes,
+  void ToResponseProto(
       const transform::Rigid3d& global_submap_pose,
       mapping::proto::SubmapQuery::Response* response) const override;
 
-  // Inserts 'laser_fan' into the Submap collection.
-  void InsertLaserFan(const sensor::LaserFan& laser_fan);
+  // Insert 'range_data' into this submap using 'range_data_inserter'. The
+  // submap must not be finished yet.
+  void InsertRangeData(const sensor::RangeData& range_data,
+                       const RangeDataInserter& range_data_inserter);
+  void Finish();
 
  private:
-  void FinishSubmap(int index);
+  ProbabilityGrid probability_grid_;
+  bool finished_ = false;
+};
+
+// Except during initialization when only a single submap exists, there are
+// always two submaps into which scans are inserted: an old submap that is used
+// for matching, and a new one, which will be used for matching next, that is
+// being initialized.
+//
+// Once a certain number of scans have been inserted, the new submap is
+// considered initialized: the old submap is no longer changed, the "new" submap
+// is now the "old" submap and is used for scan-to-map matching. Moreover, a
+// "new" submap gets created. The "old" submap is forgotten by this object.
+class ActiveSubmaps {
+ public:
+  explicit ActiveSubmaps(const proto::SubmapsOptions& options);
+
+  ActiveSubmaps(const ActiveSubmaps&) = delete;
+  ActiveSubmaps& operator=(const ActiveSubmaps&) = delete;
+
+  // Returns the index of the newest initialized Submap which can be
+  // used for scan-to-map matching.
+  int matching_index() const;
+
+  // Inserts 'range_data' into the Submap collection.
+  void InsertRangeData(const sensor::RangeData& range_data);
+
+  std::vector<std::shared_ptr<Submap>> submaps() const;
+
+ private:
+  void FinishSubmap();
   void AddSubmap(const Eigen::Vector2f& origin);
 
   const proto::SubmapsOptions options_;
-
-  std::vector<std::unique_ptr<Submap>> submaps_;
-  LaserFanInserter laser_fan_inserter_;
-
-  // Number of LaserFans inserted.
-  int num_laser_fans_ = 0;
-
-  // Number of LaserFans inserted since the last Submap was added.
-  int num_laser_fans_in_last_submap_ = 0;
+  int matching_submap_index_ = 0;
+  std::vector<std::shared_ptr<Submap>> submaps_;
+  RangeDataInserter range_data_inserter_;
 };
 
 }  // namespace mapping_2d

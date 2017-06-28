@@ -29,7 +29,7 @@ namespace scan_matching {
 namespace {
 
 TEST(PrecomputedGridGeneratorTest, TestAgainstNaiveAlgorithm) {
-  HybridGrid hybrid_grid(2.f, Eigen::Vector3f(-7.f, -12.f, 0.f));
+  HybridGrid hybrid_grid(2.f);
 
   std::mt19937 rng(23847);
   std::uniform_int_distribution<int> coordinate_distribution(-50, 49);
@@ -61,10 +61,9 @@ TEST(PrecomputedGridGeneratorTest, TestAgainstNaiveAlgorithm) {
       for (int dx = 0; dx < width; ++dx) {
         for (int dy = 0; dy < width; ++dy) {
           for (int dz = 0; dz < width; ++dz) {
-            max_probability =
-                std::max(max_probability,
-                         hybrid_grid.GetProbability(
-                             Eigen::Array3i(x + dx, y + dy, z + dz)));
+            max_probability = std::max(
+                max_probability, hybrid_grid.GetProbability(
+                                     Eigen::Array3i(x + dx, y + dy, z + dz)));
           }
         }
       }

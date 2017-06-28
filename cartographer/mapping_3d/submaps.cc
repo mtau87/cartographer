@@ -20,7 +20,7 @@
 #include <limits>
 
 #include "cartographer/common/math.h"
-#include "cartographer/sensor/laser.h"
+#include "cartographer/sensor/range_data.h"
 #include "glog/logging.h"
 
 namespace cartographer {
@@ -30,86 +30,85 @@ namespace {
 
 constexpr float kSliceHalfHeight = 0.1f;
 
-struct LaserSegment {
+struct RaySegment {
   Eigen::Vector2f from;
   Eigen::Vector2f to;
-  bool hit;  // Whether there is a laser return at 'to'.
+  bool hit;  // Whether there is a hit at 'to'.
 };
 
-// We compute a slice around the xy-plane. 'transform' is applied to the laser
-// rays in global map frame to allow choosing an arbitrary slice.
-void GenerateSegmentForSlice(const sensor::LaserFan& laser_fan,
+struct PixelData {
+  int min_z = INT_MAX;
+  int max_z = INT_MIN;
+  int count = 0;
+  float probability_sum = 0.f;
+  float max_probability = 0.5f;
+};
+
+// We compute a slice around the xy-plane. 'transform' is applied to the rays in
+// global map frame to allow choosing an arbitrary slice.
+void GenerateSegmentForSlice(const sensor::RangeData& range_data,
                              const transform::Rigid3f& pose,
                              const transform::Rigid3f& transform,
-                             std::vector<LaserSegment>* segments) {
-  const sensor::LaserFan transformed_laser_fan =
-      sensor::TransformLaserFan(laser_fan, transform * pose);
-  segments->reserve(transformed_laser_fan.returns.size());
-  for (const Eigen::Vector3f& hit : transformed_laser_fan.returns) {
-    const Eigen::Vector2f laser_origin_xy =
-        transformed_laser_fan.origin.head<2>();
-    const float laser_origin_z = transformed_laser_fan.origin.z();
-    const float delta_z = hit.z() - laser_origin_z;
-    const Eigen::Vector2f delta_xy = hit.head<2>() - laser_origin_xy;
-    if (laser_origin_z < -kSliceHalfHeight) {
-      // Laser ray originates below the slice.
+                             std::vector<RaySegment>* segments) {
+  const sensor::RangeData transformed_range_data =
+      sensor::TransformRangeData(range_data, transform * pose);
+  segments->reserve(transformed_range_data.returns.size());
+  for (const Eigen::Vector3f& hit : transformed_range_data.returns) {
+    const Eigen::Vector2f origin_xy = transformed_range_data.origin.head<2>();
+    const float origin_z = transformed_range_data.origin.z();
+    const float delta_z = hit.z() - origin_z;
+    const Eigen::Vector2f delta_xy = hit.head<2>() - origin_xy;
+    if (origin_z < -kSliceHalfHeight) {
+      // Ray originates below the slice.
       if (hit.z() > kSliceHalfHeight) {
-        // Laser ray is cutting through the slice.
-        segments->push_back(LaserSegment{
-            laser_origin_xy +
-                (-kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
-            laser_origin_xy +
-                (kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
+        // Ray is cutting through the slice.
+        segments->push_back(RaySegment{
+            origin_xy + (-kSliceHalfHeight - origin_z) / delta_z * delta_xy,
+            origin_xy + (kSliceHalfHeight - origin_z) / delta_z * delta_xy,
             false});
       } else if (hit.z() > -kSliceHalfHeight) {
-        // Laser return is inside the slice.
-        segments->push_back(LaserSegment{
-            laser_origin_xy +
-                (-kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
+        // Hit is inside the slice.
+        segments->push_back(RaySegment{
+            origin_xy + (-kSliceHalfHeight - origin_z) / delta_z * delta_xy,
             hit.head<2>(), true});
       }
-    } else if (laser_origin_z < kSliceHalfHeight) {
-      // Laser ray originates inside the slice.
+    } else if (origin_z < kSliceHalfHeight) {
+      // Ray originates inside the slice.
       if (hit.z() < -kSliceHalfHeight) {
-        // Laser hit is below.
-        segments->push_back(LaserSegment{
-            laser_origin_xy,
-            laser_origin_xy +
-                (-kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
+        // Hit is below.
+        segments->push_back(RaySegment{
+            origin_xy,
+            origin_xy + (-kSliceHalfHeight - origin_z) / delta_z * delta_xy,
             false});
       } else if (hit.z() < kSliceHalfHeight) {
         // Full ray is inside the slice.
-        segments->push_back(LaserSegment{laser_origin_xy, hit.head<2>(), true});
+        segments->push_back(RaySegment{origin_xy, hit.head<2>(), true});
       } else {
-        // Laser hit is above.
-        segments->push_back(LaserSegment{
-            laser_origin_xy,
-            laser_origin_xy +
-                (kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
+        // Hit is above.
+        segments->push_back(RaySegment{
+            origin_xy,
+            origin_xy + (kSliceHalfHeight - origin_z) / delta_z * delta_xy,
             false});
       }
     } else {
-      // Laser ray originates above the slice.
+      // Ray originates above the slice.
       if (hit.z() < -kSliceHalfHeight) {
-        // Laser ray is cutting through the slice.
-        segments->push_back(LaserSegment{
-            laser_origin_xy +
-                (kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
-            laser_origin_xy +
-                (-kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
+        // Ray is cutting through the slice.
+        segments->push_back(RaySegment{
+            origin_xy + (kSliceHalfHeight - origin_z) / delta_z * delta_xy,
+            origin_xy + (-kSliceHalfHeight - origin_z) / delta_z * delta_xy,
             false});
       } else if (hit.z() < kSliceHalfHeight) {
-        // Laser return is inside the slice.
-        segments->push_back(LaserSegment{
-            laser_origin_xy +
-                (kSliceHalfHeight - laser_origin_z) / delta_z * delta_xy,
+        // Hit is inside the slice.
+        segments->push_back(RaySegment{
+            origin_xy + (kSliceHalfHeight - origin_z) / delta_z * delta_xy,
             hit.head<2>(), true});
       }
     }
   }
 }
 
-void UpdateFreeSpaceFromSegment(const LaserSegment& segment,
+void UpdateFreeSpaceFromSegment(const RaySegment& segment,
                                 const std::vector<uint16>& miss_table,
                                 mapping_2d::ProbabilityGrid* result) {
   Eigen::Array2i from = result->limits().GetXYIndexOfCellContainingPoint(
@@ -144,17 +143,17 @@ void UpdateFreeSpaceFromSegment(const LaserSegment& segment,
   }
 }
 
-void InsertSegmentsIntoProbabilityGrid(
-    const std::vector<LaserSegment>& segments,
-    const std::vector<uint16>& hit_table, const std::vector<uint16>& miss_table,
-    mapping_2d::ProbabilityGrid* result) {
+void InsertSegmentsIntoProbabilityGrid(const std::vector<RaySegment>& segments,
+                                       const std::vector<uint16>& hit_table,
+                                       const std::vector<uint16>& miss_table,
+                                       mapping_2d::ProbabilityGrid* result) {
   result->StartUpdate();
   if (segments.empty()) {
     return;
   }
   Eigen::Vector2f min = segments.front().from;
   Eigen::Vector2f max = min;
-  for (const LaserSegment& segment : segments) {
+  for (const RaySegment& segment : segments) {
     min = min.cwiseMin(segment.from);
     min = min.cwiseMin(segment.to);
     max = max.cwiseMax(segment.from);
@@ -166,174 +165,36 @@ void InsertSegmentsIntoProbabilityGrid(
   result->GrowLimits(min.x(), min.y());
   result->GrowLimits(max.x(), max.y());
 
-  for (const LaserSegment& segment : segments) {
+  for (const RaySegment& segment : segments) {
     if (segment.hit) {
       result->ApplyLookupTable(result->limits().GetXYIndexOfCellContainingPoint(
                                    segment.to.x(), segment.to.y()),
                                hit_table);
     }
   }
-  for (const LaserSegment& segment : segments) {
+  for (const RaySegment& segment : segments) {
     UpdateFreeSpaceFromSegment(segment, miss_table, result);
   }
 }
 
-// Filters 'laser_fan', retaining only the returns that have no more than
-// 'max_range' distance from the laser origin. Removes misses and reflectivity
+// Filters 'range_data', retaining only the returns that have no more than
+// 'max_range' distance from the origin. Removes misses and reflectivity
 // information.
-sensor::LaserFan FilterLaserFanByMaxRange(const sensor::LaserFan& laser_fan,
-                                          const float max_range) {
-  sensor::LaserFan result{laser_fan.origin, {}, {}, {}};
-  for (const Eigen::Vector3f& return_ : laser_fan.returns) {
-    if ((return_ - laser_fan.origin).norm() <= max_range) {
-      result.returns.push_back(return_);
+sensor::RangeData FilterRangeDataByMaxRange(const sensor::RangeData& range_data,
+                                            const float max_range) {
+  sensor::RangeData result{range_data.origin, {}, {}};
+  for (const Eigen::Vector3f& hit : range_data.returns) {
+    if ((hit - range_data.origin).norm() <= max_range) {
+      result.returns.push_back(hit);
     }
   }
   return result;
 }
 
-}  // namespace
-
-void InsertIntoProbabilityGrid(
-    const sensor::LaserFan& laser_fan, const transform::Rigid3f& pose,
-    const float slice_z, const mapping_2d::LaserFanInserter& laser_fan_inserter,
-    mapping_2d::ProbabilityGrid* result) {
-  std::vector<LaserSegment> segments;
-  GenerateSegmentForSlice(
-      laser_fan, pose,
-      transform::Rigid3f::Translation(-slice_z * Eigen::Vector3f::UnitZ()),
-      &segments);
-  InsertSegmentsIntoProbabilityGrid(segments, laser_fan_inserter.hit_table(),
-                                    laser_fan_inserter.miss_table(), result);
-}
-
-proto::SubmapsOptions CreateSubmapsOptions(
-    common::LuaParameterDictionary* parameter_dictionary) {
-  proto::SubmapsOptions options;
-  options.set_high_resolution(
-      parameter_dictionary->GetDouble("high_resolution"));
-  options.set_high_resolution_max_range(
-      parameter_dictionary->GetDouble("high_resolution_max_range"));
-  options.set_low_resolution(parameter_dictionary->GetDouble("low_resolution"));
-  options.set_num_laser_fans(
-      parameter_dictionary->GetNonNegativeInt("num_laser_fans"));
-  *options.mutable_laser_fan_inserter_options() = CreateLaserFanInserterOptions(
-      parameter_dictionary->GetDictionary("laser_fan_inserter").get());
-  CHECK_GT(options.num_laser_fans(), 0);
-  return options;
-}
-
-Submap::Submap(const float high_resolution, const float low_resolution,
-               const Eigen::Vector3f& origin, const int begin_laser_fan_index)
-    : mapping::Submap(origin, begin_laser_fan_index),
-      high_resolution_hybrid_grid(high_resolution, origin),
-      low_resolution_hybrid_grid(low_resolution, origin) {}
-
-Submaps::Submaps(const proto::SubmapsOptions& options)
-    : options_(options),
-      laser_fan_inserter_(options.laser_fan_inserter_options()) {
-  // We always want to have at least one likelihood field which we can return,
-  // and will create it at the origin in absence of a better choice.
-  AddSubmap(Eigen::Vector3f::Zero());
-}
-
-const Submap* Submaps::Get(int index) const {
-  CHECK_GE(index, 0);
-  CHECK_LT(index, size());
-  return submaps_[index].get();
-}
-
-int Submaps::size() const { return submaps_.size(); }
-
-void Submaps::SubmapToProto(
-    int index, const std::vector<mapping::TrajectoryNode>& trajectory_nodes,
-    const transform::Rigid3d& global_submap_pose,
-    mapping::proto::SubmapQuery::Response* const response) const {
-  // Generate an X-ray view through the 'hybrid_grid', aligned to the xy-plane
-  // in the global map frame.
-  const HybridGrid& hybrid_grid = Get(index)->high_resolution_hybrid_grid;
-  response->set_resolution(hybrid_grid.resolution());
-
-  // Compute a bounding box for the texture.
-  Eigen::Array2i min_index(INT_MAX, INT_MAX);
-  Eigen::Array2i max_index(INT_MIN, INT_MIN);
-  const std::vector<Eigen::Array4i> voxel_indices_and_probabilities =
-      ExtractVoxelData(hybrid_grid,
-                       (global_submap_pose * Get(index)->local_pose().inverse())
-                           .cast<float>(),
-                       &min_index, &max_index);
-
-  const int width = max_index.y() - min_index.y() + 1;
-  const int height = max_index.x() - min_index.x() + 1;
-  response->set_width(width);
-  response->set_height(height);
-
-  const std::vector<PixelData> accumulated_pixel_data = AccumulatePixelData(
-      width, height, min_index, max_index, voxel_indices_and_probabilities);
-  const string cell_data = ComputePixelValues(accumulated_pixel_data);
-
-  common::FastGzipString(cell_data, response->mutable_cells());
-  *response->mutable_slice_pose() =
-      transform::ToProto(global_submap_pose.inverse() *
-                         transform::Rigid3d::Translation(Eigen::Vector3d(
-                             max_index.x() * hybrid_grid.resolution(),
-                             max_index.y() * hybrid_grid.resolution(),
-                             global_submap_pose.translation().z())));
-}
-
-void Submaps::InsertLaserFan(const sensor::LaserFan& laser_fan) {
-  CHECK_LT(num_laser_fans_, std::numeric_limits<int>::max());
-  ++num_laser_fans_;
-  for (const int index : insertion_indices()) {
-    Submap* submap = submaps_[index].get();
-    laser_fan_inserter_.Insert(
-        FilterLaserFanByMaxRange(laser_fan,
-                                 options_.high_resolution_max_range()),
-        &submap->high_resolution_hybrid_grid);
-    laser_fan_inserter_.Insert(laser_fan, &submap->low_resolution_hybrid_grid);
-    submap->end_laser_fan_index = num_laser_fans_;
-  }
-  ++num_laser_fans_in_last_submap_;
-  if (num_laser_fans_in_last_submap_ == options_.num_laser_fans()) {
-    AddSubmap(laser_fan.origin);
-  }
-}
-
-const HybridGrid& Submaps::high_resolution_matching_grid() const {
-  return submaps_[matching_index()]->high_resolution_hybrid_grid;
-}
-
-const HybridGrid& Submaps::low_resolution_matching_grid() const {
-  return submaps_[matching_index()]->low_resolution_hybrid_grid;
-}
-
-void Submaps::AddTrajectoryNodeIndex(const int trajectory_node_index) {
-  for (int i = 0; i != size(); ++i) {
-    Submap& submap = *submaps_[i];
-    if (submap.end_laser_fan_index == num_laser_fans_ &&
-        submap.begin_laser_fan_index <= num_laser_fans_ - 1) {
-      submap.trajectory_node_indices.push_back(trajectory_node_index);
-    }
-  }
-}
-
-void Submaps::AddSubmap(const Eigen::Vector3f& origin) {
-  if (size() > 1) {
-    Submap* submap = submaps_[size() - 2].get();
-    CHECK(!submap->finished);
-    submap->finished = true;
-  }
-  submaps_.emplace_back(new Submap(options_.high_resolution(),
-                                   options_.low_resolution(), origin,
-                                   num_laser_fans_));
-  LOG(INFO) << "Added submap " << size();
-  num_laser_fans_in_last_submap_ = 0;
-}
-
-std::vector<Submaps::PixelData> Submaps::AccumulatePixelData(
+std::vector<PixelData> AccumulatePixelData(
     const int width, const int height, const Eigen::Array2i& min_index,
     const Eigen::Array2i& max_index,
-    const std::vector<Eigen::Array4i>& voxel_indices_and_probabilities) const {
+    const std::vector<Eigen::Array4i>& voxel_indices_and_probabilities) {
   std::vector<PixelData> accumulated_pixel_data(width * height);
   for (const Eigen::Array4i& voxel_index_and_probability :
        voxel_indices_and_probabilities) {
@@ -356,13 +217,16 @@ std::vector<Submaps::PixelData> Submaps::AccumulatePixelData(
   return accumulated_pixel_data;
 }
 
-std::vector<Eigen::Array4i> Submaps::ExtractVoxelData(
+// The first three entries of each returned value are a cell_index and the
+// last is the corresponding probability value. We batch them together like
+// this to only have one vector and have better cache locality.
+std::vector<Eigen::Array4i> ExtractVoxelData(
     const HybridGrid& hybrid_grid, const transform::Rigid3f& transform,
-    Eigen::Array2i* min_index, Eigen::Array2i* max_index) const {
+    Eigen::Array2i* min_index, Eigen::Array2i* max_index) {
   std::vector<Eigen::Array4i> voxel_indices_and_probabilities;
-  const float resolution_inverse = 1. / hybrid_grid.resolution();
+  const float resolution_inverse = 1.f / hybrid_grid.resolution();
 
-  constexpr double kXrayObstructedCellProbabilityLimit = 0.501;
+  constexpr float kXrayObstructedCellProbabilityLimit = 0.501f;
   for (auto it = HybridGrid::Iterator(hybrid_grid); !it.Done(); it.Next()) {
     const uint16 probability_value = it.GetValue();
     const float probability = mapping::ValueToProbability(probability_value);
@@ -371,9 +235,9 @@ std::vector<Eigen::Array4i> Submaps::ExtractVoxelData(
       continue;
     }
 
-    const Eigen::Vector3f cell_center_local =
+    const Eigen::Vector3f cell_center_submap =
         hybrid_grid.GetCenterOfCell(it.GetCellIndex());
-    const Eigen::Vector3f cell_center_global = transform * cell_center_local;
+    const Eigen::Vector3f cell_center_global = transform * cell_center_submap;
     const Eigen::Array4i voxel_index_and_probability(
         common::RoundToInt(cell_center_global.x() * resolution_inverse),
         common::RoundToInt(cell_center_global.y() * resolution_inverse),
@@ -388,8 +252,10 @@ std::vector<Eigen::Array4i> Submaps::ExtractVoxelData(
   return voxel_indices_and_probabilities;
 }
 
-string Submaps::ComputePixelValues(
-    const std::vector<Submaps::PixelData>& accumulated_pixel_data) const {
+// Builds texture data containing interleaved value and alpha for the
+// visualization from 'accumulated_pixel_data'.
+string ComputePixelValues(
+    const std::vector<PixelData>& accumulated_pixel_data) {
   string cell_data;
   cell_data.reserve(2 * accumulated_pixel_data.size());
   constexpr float kMinZDifference = 3.f;
@@ -419,6 +285,140 @@ string Submaps::ComputePixelValues(
     cell_data.push_back((value || alpha) ? alpha : 1);  // alpha
   }
   return cell_data;
+}
+
+}  // namespace
+
+void InsertIntoProbabilityGrid(
+    const sensor::RangeData& range_data, const transform::Rigid3f& pose,
+    const float slice_z,
+    const mapping_2d::RangeDataInserter& range_data_inserter,
+    mapping_2d::ProbabilityGrid* result) {
+  std::vector<RaySegment> segments;
+  GenerateSegmentForSlice(
+      range_data, pose,
+      transform::Rigid3f::Translation(-slice_z * Eigen::Vector3f::UnitZ()),
+      &segments);
+  InsertSegmentsIntoProbabilityGrid(segments, range_data_inserter.hit_table(),
+                                    range_data_inserter.miss_table(), result);
+}
+
+proto::SubmapsOptions CreateSubmapsOptions(
+    common::LuaParameterDictionary* parameter_dictionary) {
+  proto::SubmapsOptions options;
+  options.set_high_resolution(
+      parameter_dictionary->GetDouble("high_resolution"));
+  options.set_high_resolution_max_range(
+      parameter_dictionary->GetDouble("high_resolution_max_range"));
+  options.set_low_resolution(parameter_dictionary->GetDouble("low_resolution"));
+  options.set_num_range_data(
+      parameter_dictionary->GetNonNegativeInt("num_range_data"));
+  *options.mutable_range_data_inserter_options() =
+      CreateRangeDataInserterOptions(
+          parameter_dictionary->GetDictionary("range_data_inserter").get());
+  CHECK_GT(options.num_range_data(), 0);
+  return options;
+}
+
+Submap::Submap(const float high_resolution, const float low_resolution,
+               const transform::Rigid3d& local_pose)
+    : mapping::Submap(local_pose),
+      high_resolution_hybrid_grid_(high_resolution),
+      low_resolution_hybrid_grid_(low_resolution) {}
+
+void Submap::ToResponseProto(
+    const transform::Rigid3d& global_submap_pose,
+    mapping::proto::SubmapQuery::Response* const response) const {
+  response->set_submap_version(num_range_data());
+  // Generate an X-ray view through the 'hybrid_grid', aligned to the xy-plane
+  // in the global map frame.
+  const float resolution = high_resolution_hybrid_grid_.resolution();
+  response->set_resolution(resolution);
+
+  // Compute a bounding box for the texture.
+  Eigen::Array2i min_index(INT_MAX, INT_MAX);
+  Eigen::Array2i max_index(INT_MIN, INT_MIN);
+  const std::vector<Eigen::Array4i> voxel_indices_and_probabilities =
+      ExtractVoxelData(high_resolution_hybrid_grid_,
+                       global_submap_pose.cast<float>(), &min_index,
+                       &max_index);
+
+  const int width = max_index.y() - min_index.y() + 1;
+  const int height = max_index.x() - min_index.x() + 1;
+  response->set_width(width);
+  response->set_height(height);
+
+  const std::vector<PixelData> accumulated_pixel_data = AccumulatePixelData(
+      width, height, min_index, max_index, voxel_indices_and_probabilities);
+  const string cell_data = ComputePixelValues(accumulated_pixel_data);
+
+  common::FastGzipString(cell_data, response->mutable_cells());
+  *response->mutable_slice_pose() = transform::ToProto(
+      global_submap_pose.inverse() *
+      transform::Rigid3d::Translation(Eigen::Vector3d(
+          max_index.x() * resolution, max_index.y() * resolution,
+          global_submap_pose.translation().z())));
+}
+
+void Submap::InsertRangeData(const sensor::RangeData& range_data,
+                             const RangeDataInserter& range_data_inserter,
+                             const int high_resolution_max_range) {
+  CHECK(!finished_);
+  const sensor::RangeData transformed_range_data = sensor::TransformRangeData(
+      range_data, local_pose().inverse().cast<float>());
+  range_data_inserter.Insert(
+      FilterRangeDataByMaxRange(transformed_range_data,
+                                high_resolution_max_range),
+      &high_resolution_hybrid_grid_);
+  range_data_inserter.Insert(transformed_range_data,
+                             &low_resolution_hybrid_grid_);
+  ++num_range_data_;
+}
+
+void Submap::Finish() {
+  CHECK(!finished_);
+  finished_ = true;
+}
+
+ActiveSubmaps::ActiveSubmaps(const proto::SubmapsOptions& options)
+    : options_(options),
+      range_data_inserter_(options.range_data_inserter_options()) {
+  // We always want to have at least one submap which we can return and will
+  // create it at the origin in absence of a better choice.
+  //
+  // TODO(whess): Start with no submaps, so that all of them can be
+  // approximately gravity aligned.
+  AddSubmap(transform::Rigid3d::Identity());
+}
+
+std::vector<std::shared_ptr<Submap>> ActiveSubmaps::submaps() const {
+  return submaps_;
+}
+
+int ActiveSubmaps::matching_index() const { return matching_submap_index_; }
+
+void ActiveSubmaps::InsertRangeData(
+    const sensor::RangeData& range_data,
+    const Eigen::Quaterniond& gravity_alignment) {
+  for (auto& submap : submaps_) {
+    submap->InsertRangeData(range_data, range_data_inserter_,
+                            options_.high_resolution_max_range());
+  }
+  if (submaps_.back()->num_range_data() == options_.num_range_data()) {
+    AddSubmap(transform::Rigid3d(range_data.origin.cast<double>(),
+                                 gravity_alignment));
+  }
+}
+
+void ActiveSubmaps::AddSubmap(const transform::Rigid3d& local_pose) {
+  if (submaps_.size() > 1) {
+    submaps_.front()->Finish();
+    ++matching_submap_index_;
+    submaps_.erase(submaps_.begin());
+  }
+  submaps_.emplace_back(new Submap(options_.high_resolution(),
+                                   options_.low_resolution(), local_pose));
+  LOG(INFO) << "Added submap " << matching_submap_index_ + submaps_.size();
 }
 
 }  // namespace mapping_3d

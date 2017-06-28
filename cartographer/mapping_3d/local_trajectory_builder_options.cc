@@ -18,7 +18,6 @@
 
 #include "cartographer/mapping_3d/kalman_local_trajectory_builder_options.h"
 #include "cartographer/mapping_3d/motion_filter.h"
-#include "cartographer/mapping_3d/optimizing_local_trajectory_builder_options.h"
 #include "cartographer/mapping_3d/scan_matching/ceres_scan_matcher.h"
 #include "cartographer/mapping_3d/submaps.h"
 #include "cartographer/sensor/voxel_filter.h"
@@ -30,14 +29,12 @@ namespace mapping_3d {
 proto::LocalTrajectoryBuilderOptions CreateLocalTrajectoryBuilderOptions(
     common::LuaParameterDictionary* const parameter_dictionary) {
   proto::LocalTrajectoryBuilderOptions options;
-  options.set_laser_min_range(
-      parameter_dictionary->GetDouble("laser_min_range"));
-  options.set_laser_max_range(
-      parameter_dictionary->GetDouble("laser_max_range"));
+  options.set_min_range(parameter_dictionary->GetDouble("min_range"));
+  options.set_max_range(parameter_dictionary->GetDouble("max_range"));
   options.set_scans_per_accumulation(
       parameter_dictionary->GetInt("scans_per_accumulation"));
-  options.set_laser_voxel_filter_size(
-      parameter_dictionary->GetDouble("laser_voxel_filter_size"));
+  options.set_voxel_filter_size(
+      parameter_dictionary->GetDouble("voxel_filter_size"));
   *options.mutable_high_resolution_adaptive_voxel_filter_options() =
       sensor::CreateAdaptiveVoxelFilterOptions(
           parameter_dictionary
@@ -59,16 +56,6 @@ proto::LocalTrajectoryBuilderOptions CreateLocalTrajectoryBuilderOptions(
       CreateKalmanLocalTrajectoryBuilderOptions(
           parameter_dictionary->GetDictionary("kalman_local_trajectory_builder")
               .get());
-  *options.mutable_optimizing_local_trajectory_builder_options() =
-      CreateOptimizingLocalTrajectoryBuilderOptions(
-          parameter_dictionary
-              ->GetDictionary("optimizing_local_trajectory_builder")
-              .get());
-  const string use_string = parameter_dictionary->GetString("use");
-  proto::LocalTrajectoryBuilderOptions::Use use;
-  CHECK(proto::LocalTrajectoryBuilderOptions::Use_Parse(use_string, &use))
-      << "Unknown local_trajectory_builder kind: " << use_string;
-  options.set_use(use);
   return options;
 }
 

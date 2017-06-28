@@ -21,32 +21,27 @@ namespace mapping_2d {
 
 GlobalTrajectoryBuilder::GlobalTrajectoryBuilder(
     const proto::LocalTrajectoryBuilderOptions& options,
-    SparsePoseGraph* sparse_pose_graph)
-    : options_(options),
+    const int trajectory_id, SparsePoseGraph* sparse_pose_graph)
+    : trajectory_id_(trajectory_id),
       sparse_pose_graph_(sparse_pose_graph),
       local_trajectory_builder_(options) {}
 
 GlobalTrajectoryBuilder::~GlobalTrajectoryBuilder() {}
 
-const Submaps* GlobalTrajectoryBuilder::submaps() const {
-  return local_trajectory_builder_.submaps();
-}
-
 void GlobalTrajectoryBuilder::AddRangefinderData(
     const common::Time time, const Eigen::Vector3f& origin,
     const sensor::PointCloud& ranges) {
   std::unique_ptr<LocalTrajectoryBuilder::InsertionResult> insertion_result =
-      local_trajectory_builder_.AddHorizontalLaserFan(
-          time, sensor::LaserFan{origin, ranges, {}, {}});
-  if (insertion_result != nullptr) {
-    sparse_pose_graph_->AddScan(
-        insertion_result->time, insertion_result->tracking_to_tracking_2d,
-        insertion_result->laser_fan_in_tracking_2d,
-        insertion_result->pose_estimate_2d,
-        kalman_filter::Project2D(insertion_result->covariance_estimate),
-        insertion_result->submaps, insertion_result->matching_submap,
-        insertion_result->insertion_submaps);
+      local_trajectory_builder_.AddHorizontalRangeData(
+          time, sensor::RangeData{origin, ranges, {}});
+  if (insertion_result == nullptr) {
+    return;
   }
+  sparse_pose_graph_->AddScan(
+      insertion_result->time, insertion_result->tracking_to_tracking_2d,
+      insertion_result->range_data_in_tracking_2d,
+      insertion_result->pose_estimate_2d, trajectory_id_,
+      std::move(insertion_result->insertion_submaps));
 }
 
 void GlobalTrajectoryBuilder::AddImuData(
@@ -54,8 +49,8 @@ void GlobalTrajectoryBuilder::AddImuData(
     const Eigen::Vector3d& angular_velocity) {
   local_trajectory_builder_.AddImuData(time, linear_acceleration,
                                        angular_velocity);
-  sparse_pose_graph_->AddImuData(local_trajectory_builder_.submaps(), time,
-                                 linear_acceleration, angular_velocity);
+  sparse_pose_graph_->AddImuData(trajectory_id_, time, linear_acceleration,
+                                 angular_velocity);
 }
 
 void GlobalTrajectoryBuilder::AddOdometerData(const common::Time time,

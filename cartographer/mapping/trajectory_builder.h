@@ -21,16 +21,21 @@
 #include <memory>
 #include <string>
 
+#include "cartographer/common/lua_parameter_dictionary.h"
 #include "cartographer/common/make_unique.h"
 #include "cartographer/common/port.h"
 #include "cartographer/common/time.h"
+#include "cartographer/mapping/proto/trajectory_builder_options.pb.h"
 #include "cartographer/mapping/submaps.h"
 #include "cartographer/sensor/data.h"
-#include "cartographer/sensor/laser.h"
 #include "cartographer/sensor/point_cloud.h"
+#include "cartographer/sensor/range_data.h"
 
 namespace cartographer {
 namespace mapping {
+
+proto::TrajectoryBuilderOptions CreateTrajectoryBuilderOptions(
+    common::LuaParameterDictionary* const parameter_dictionary);
 
 // This interface is used for both 2D and 3D SLAM.
 class TrajectoryBuilder {
@@ -54,7 +59,6 @@ class TrajectoryBuilder {
   TrajectoryBuilder(const TrajectoryBuilder&) = delete;
   TrajectoryBuilder& operator=(const TrajectoryBuilder&) = delete;
 
-  virtual const Submaps* submaps() const = 0;
   virtual const PoseEstimate& pose_estimate() const = 0;
 
   virtual void AddSensorData(const string& sensor_id,

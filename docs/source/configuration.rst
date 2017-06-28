@@ -49,9 +49,6 @@ double imu_gravity_time_constant
   Time constant for the orientation moving average based on observed gravity
   via linear acceleration.
 
-double imu_gravity_variance
-  Not yet documented.
-
 int32 num_odometry_states
   Maximum number of previous odometry states to keep.
 
@@ -62,13 +59,7 @@ cartographer.mapping.proto.MapBuilderOptions
 bool use_trajectory_builder_2d
   Not yet documented.
 
-cartographer.mapping_2d.proto.LocalTrajectoryBuilderOptions trajectory_builder_2d_options
-  Not yet documented.
-
 bool use_trajectory_builder_3d
-  Not yet documented.
-
-cartographer.mapping_3d.proto.LocalTrajectoryBuilderOptions trajectory_builder_3d_options
   Not yet documented.
 
 int32 num_background_threads
@@ -88,6 +79,14 @@ int32 optimize_every_n_scans
 cartographer.mapping.sparse_pose_graph.proto.ConstraintBuilderOptions constraint_builder_options
   Options for the constraint builder.
 
+double matcher_translation_weight
+  Weight used in the optimization problem for the translational component of
+  non-loop-closure scan matcher constraints.
+
+double matcher_rotation_weight
+  Weight used in the optimization problem for the rotational component of
+  non-loop-closure scan matcher constraints.
+
 cartographer.mapping.sparse_pose_graph.proto.OptimizationProblemOptions optimization_problem_options
   Options for the optimization problem.
 
@@ -98,6 +97,16 @@ int32 max_num_final_iterations
 double global_sampling_ratio
   Rate at which we sample a single trajectory's scans for global
   localization.
+
+
+cartographer.mapping.proto.TrajectoryBuilderOptions
+===================================================
+
+cartographer.mapping_2d.proto.LocalTrajectoryBuilderOptions trajectory_builder_2d_options
+  Not yet documented.
+
+cartographer.mapping_3d.proto.LocalTrajectoryBuilderOptions trajectory_builder_3d_options
+  Not yet documented.
 
 
 cartographer.mapping.sparse_pose_graph.proto.ConstraintBuilderOptions
@@ -120,8 +129,13 @@ double min_score
 double global_localization_min_score
   Threshold below which global localizations are not trusted.
 
-double lower_covariance_eigenvalue_bound
-  Lower bound for covariance eigenvalues to limit the weight of matches.
+double loop_closure_translation_weight
+  Weight used in the optimization problem for the translational component of
+  loop closure constraints.
+
+double loop_closure_rotation_weight
+  Weight used in the optimization problem for the rotational component of
+  loop closure constraints.
 
 bool log_matches
   If enabled, logs information of loop-closing constraints for debugging.
@@ -164,43 +178,26 @@ cartographer.common.proto.CeresSolverOptions ceres_solver_options
   Not yet documented.
 
 
-cartographer.mapping_2d.proto.LaserFanInserterOptions
-=====================================================
-
-double hit_probability
-  Probability change for a hit (this will be converted to odds and therefore
-  must be greater than 0.5).
-
-double miss_probability
-  Probability change for a miss (this will be converted to odds and therefore
-  must be less than 0.5).
-
-bool insert_free_space
-  If 'false', free space will not change the probabilities in the occupancy
-  grid.
-
-
 cartographer.mapping_2d.proto.LocalTrajectoryBuilderOptions
 ===========================================================
 
-float laser_min_range
-  Laser returns outside these ranges will be dropped.
+float min_range
+  Rangefinder points outside these ranges will be dropped.
 
-float laser_max_range
+float max_range
   Not yet documented.
 
-float laser_min_z
+float min_z
   Not yet documented.
 
-float laser_max_z
+float max_z
   Not yet documented.
 
-float laser_missing_echo_ray_length
-  Laser returns beyond 'laser_max_range' will be inserted with this length as
-  empty space.
+float missing_data_ray_length
+  Points beyond 'max_range' will be inserted with this length as empty space.
 
-float laser_voxel_filter_size
-  Voxel filter that gets applied to the horizontal laser immediately after
+float voxel_filter_size
+  Voxel filter that gets applied to the range data immediately after
   cropping.
 
 bool use_online_correlative_scan_matching
@@ -237,6 +234,22 @@ bool use_imu_data
   True if IMU data should be expected and used.
 
 
+cartographer.mapping_2d.proto.RangeDataInserterOptions
+======================================================
+
+double hit_probability
+  Probability change for a hit (this will be converted to odds and therefore
+  must be greater than 0.5).
+
+double miss_probability
+  Probability change for a miss (this will be converted to odds and therefore
+  must be less than 0.5).
+
+bool insert_free_space
+  If 'false', free space will not change the probabilities in the occupancy
+  grid.
+
+
 cartographer.mapping_2d.proto.SubmapsOptions
 ============================================
 
@@ -246,15 +259,12 @@ double resolution
 double half_length
   Half the width/height of each submap, its "radius".
 
-int32 num_laser_fans
+int32 num_range_data
   Number of scans before adding a new submap. Each submap will get twice the
   number of scans inserted: First for initialization without being matched
   against, then while being matched.
 
-bool output_debug_images
-  If enabled, submap%d.png images are written for debugging.
-
-cartographer.mapping_2d.proto.LaserFanInserterOptions laser_fan_inserter_options
+cartographer.mapping_2d.proto.RangeDataInserterOptions range_data_inserter_options
   Not yet documented.
 
 
@@ -269,9 +279,6 @@ double translation_weight
 
 double rotation_weight
   Not yet documented.
-
-double covariance_scale
-  Scale applied to the covariance estimate from Ceres.
 
 cartographer.common.proto.CeresSolverOptions ceres_solver_options
   Configure the Ceres solver. See the Ceres documentation for more
@@ -324,6 +331,9 @@ cartographer.mapping_2d.scan_matching.proto.RealTimeCorrelativeScanMatcherOption
 cartographer.kalman_filter.proto.PoseTrackerOptions pose_tracker_options
   Not yet documented.
 
+double scan_matcher_variance
+  Not yet documented.
+
 double odometer_translational_variance
   Not yet documented.
 
@@ -331,24 +341,40 @@ double odometer_rotational_variance
   Not yet documented.
 
 
-cartographer.mapping_3d.proto.LaserFanInserterOptions
-=====================================================
-
-double hit_probability
-  Probability change for a hit (this will be converted to odds and therefore
-  must be greater than 0.5).
-
-double miss_probability
-  Probability change for a miss (this will be converted to odds and therefore
-  must be less than 0.5).
-
-int32 num_free_space_voxels
-  Up to how many free space voxels are updated for scan matching.
-  0 disables free space.
-
-
 cartographer.mapping_3d.proto.LocalTrajectoryBuilderOptions
 ===========================================================
+
+float min_range
+  Rangefinder points outside these ranges will be dropped.
+
+float max_range
+  Not yet documented.
+
+int32 scans_per_accumulation
+  Number of scans to accumulate into one unwarped, combined scan to use for
+  scan matching.
+
+float voxel_filter_size
+  Voxel filter that gets applied to the range data immediately after
+  cropping.
+
+cartographer.sensor.proto.AdaptiveVoxelFilterOptions high_resolution_adaptive_voxel_filter_options
+  Voxel filter used to compute a sparser point cloud for matching.
+
+cartographer.sensor.proto.AdaptiveVoxelFilterOptions low_resolution_adaptive_voxel_filter_options
+  Not yet documented.
+
+cartographer.mapping_3d.scan_matching.proto.CeresScanMatcherOptions ceres_scan_matcher_options
+  Not yet documented.
+
+cartographer.mapping_3d.proto.MotionFilterOptions motion_filter_options
+  Not yet documented.
+
+cartographer.mapping_3d.proto.SubmapsOptions submaps_options
+  Not yet documented.
+
+cartographer.mapping_3d.proto.KalmanLocalTrajectoryBuilderOptions kalman_local_trajectory_builder_options
+  Not yet documented.
 
 
 cartographer.mapping_3d.proto.MotionFilterOptions
@@ -364,29 +390,20 @@ double max_angle_radians
   Threshold above which a new scan is inserted based on rotational motion.
 
 
-cartographer.mapping_3d.proto.OptimizingLocalTrajectoryBuilderOptions
-=====================================================================
+cartographer.mapping_3d.proto.RangeDataInserterOptions
+======================================================
 
-double high_resolution_grid_weight
-  Not yet documented.
+double hit_probability
+  Probability change for a hit (this will be converted to odds and therefore
+  must be greater than 0.5).
 
-double low_resolution_grid_weight
-  Not yet documented.
+double miss_probability
+  Probability change for a miss (this will be converted to odds and therefore
+  must be less than 0.5).
 
-double velocity_weight
-  Not yet documented.
-
-double translation_weight
-  Not yet documented.
-
-double rotation_weight
-  Not yet documented.
-
-double odometry_translation_weight
-  Not yet documented.
-
-double odometry_rotation_weight
-  Not yet documented.
+int32 num_free_space_voxels
+  Up to how many free space voxels are updated for scan matching.
+  0 disables free space.
 
 
 cartographer.mapping_3d.proto.SubmapsOptions
@@ -404,12 +421,12 @@ double low_resolution
   Resolution of the 'low_resolution' version of the map in meters used for
   local SLAM only.
 
-int32 num_laser_fans
+int32 num_range_data
   Number of scans before adding a new submap. Each submap will get twice the
   number of scans inserted: First for initialization without being matched
   against, then while being matched.
 
-cartographer.mapping_3d.proto.LaserFanInserterOptions laser_fan_inserter_options
+cartographer.mapping_3d.proto.RangeDataInserterOptions range_data_inserter_options
   Not yet documented.
 
 
@@ -421,9 +438,6 @@ double translation_weight
 
 double rotation_weight
   Not yet documented.
-
-double covariance_scale
-  Scale applied to the covariance estimate from Ceres.
 
 bool only_optimize_yaw
   Whether only to allow changes to yaw, keeping roll/pitch constant.

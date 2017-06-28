@@ -34,10 +34,9 @@ namespace {
 class CeresScanMatcherTest : public ::testing::Test {
  protected:
   CeresScanMatcherTest()
-      : hybrid_grid_(1.f /* resolution */,
-                     Eigen::Vector3f(0.5f, 0.5f, 0.5f) /* origin */),
+      : hybrid_grid_(1.f),
         expected_pose_(
-            transform::Rigid3d::Translation(Eigen::Vector3d(-0.5, 0.5, 0.5))) {
+            transform::Rigid3d::Translation(Eigen::Vector3d(-1., 0., 0.))) {
     for (const auto& point :
          {Eigen::Vector3f(-3.f, 2.f, 0.f), Eigen::Vector3f(-4.f, 2.f, 0.f),
           Eigen::Vector3f(-5.f, 2.f, 0.f), Eigen::Vector3f(-6.f, 2.f, 0.f),
@@ -53,7 +52,6 @@ class CeresScanMatcherTest : public ::testing::Test {
           occupied_space_weight_0 = 1.,
           translation_weight = 0.01,
           rotation_weight = 0.1,
-          covariance_scale = 10.,
           only_optimize_yaw = false,
           ceres_solver_options = {
             use_nonmonotonic_steps = true,
@@ -67,12 +65,11 @@ class CeresScanMatcherTest : public ::testing::Test {
 
   void TestFromInitialPose(const transform::Rigid3d& initial_pose) {
     transform::Rigid3d pose;
-    kalman_filter::PoseCovariance covariance;
 
     ceres::Solver::Summary summary;
     ceres_scan_matcher_->Match(initial_pose, initial_pose,
                                {{&point_cloud_, &hybrid_grid_}}, &pose,
-                               &covariance, &summary);
+                               &summary);
     EXPECT_NEAR(0., summary.final_cost, 1e-2) << summary.FullReport();
     EXPECT_THAT(pose, transform::IsNearly(expected_pose_, 3e-2));
   }
@@ -86,23 +83,23 @@ class CeresScanMatcherTest : public ::testing::Test {
 
 TEST_F(CeresScanMatcherTest, PerfectEstimate) {
   TestFromInitialPose(
-      transform::Rigid3d::Translation(Eigen::Vector3d(-0.5, 0.5, 0.5)));
+      transform::Rigid3d::Translation(Eigen::Vector3d(-1., 0., 0.)));
 }
 
 TEST_F(CeresScanMatcherTest, AlongX) {
   ceres_scan_matcher_.reset(new CeresScanMatcher(options_));
   TestFromInitialPose(
-      transform::Rigid3d::Translation(Eigen::Vector3d(-0.3, 0.5, 0.5)));
+      transform::Rigid3d::Translation(Eigen::Vector3d(-0.8, 0., 0.)));
 }
 
 TEST_F(CeresScanMatcherTest, AlongZ) {
   TestFromInitialPose(
-      transform::Rigid3d::Translation(Eigen::Vector3d(-0.5, 0.5, 0.3)));
+      transform::Rigid3d::Translation(Eigen::Vector3d(-1., 0., -0.2)));
 }
 
 TEST_F(CeresScanMatcherTest, AlongXYZ) {
   TestFromInitialPose(
-      transform::Rigid3d::Translation(Eigen::Vector3d(-0.4, 0.3, 0.7)));
+      transform::Rigid3d::Translation(Eigen::Vector3d(-0.9, -0.2, 0.2)));
 }
 
 TEST_F(CeresScanMatcherTest, FullPoseCorrection) {
@@ -114,9 +111,8 @@ TEST_F(CeresScanMatcherTest, FullPoseCorrection) {
   expected_pose_ = expected_pose_ * additional_transform.inverse();
   // ...starting initially with rotation around x.
   TestFromInitialPose(
-      transform::Rigid3d::Translation(Eigen::Vector3d(-0.45, 0.45, 0.55)) *
-      transform::Rigid3d::Rotation(
-          Eigen::AngleAxisd(0.05, Eigen::Vector3d(1., 0., 0.))));
+      transform::Rigid3d(Eigen::Vector3d(-0.95, -0.05, 0.05),
+                         Eigen::AngleAxisd(0.05, Eigen::Vector3d(1., 0., 0.))));
 }
 
 }  // namespace
